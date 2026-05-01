@@ -1,0 +1,1100 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="theme-color" content="#B07D6E">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="Streak">
+<link rel="manifest" href="manifest.json">
+<title>Streak — Habit Tracker</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=DM+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" crossorigin="anonymous"></script>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  html { height: 100%; }
+  body {
+    height: 100%;
+    background: #F9F6F0;
+    font-family: 'DM Sans', sans-serif;
+    overscroll-behavior: none;
+    -webkit-font-smoothing: antialiased;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  #root {
+    width: 100%;
+    max-width: 480px;
+    height: 100vh;
+    height: 100dvh;
+    margin: 0 auto;
+    background: #F9F6F0;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .screen-container {
+    position: absolute;
+    top: 0; left: 0; right: 0; bottom: 0;
+    overflow: hidden;
+  }
+
+  .screen {
+    position: absolute;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: #F9F6F0;
+    overflow-y: auto;
+    overflow-x: hidden;
+    padding-top: max(20px, env(safe-area-inset-top, 0px));
+    padding-bottom: calc(90px + env(safe-area-inset-bottom, 0px));
+    transition: transform 0.45s cubic-bezier(0.32, 0.72, 0, 1), opacity 0.35s ease;
+    scrollbar-width: none;
+  }
+  .screen::-webkit-scrollbar { display: none; }
+  .screen.hidden-right { transform: translateX(100%); opacity: 0; pointer-events: none; }
+  .screen.hidden-left  { transform: translateX(-100%); opacity: 0; pointer-events: none; }
+
+  /* screens without bottom nav */
+  .screen.no-nav { padding-bottom: max(24px, env(safe-area-inset-bottom, 0px)); }
+
+  .bottom-nav {
+    position: absolute;
+    bottom: 0; left: 0; right: 0;
+    background: rgba(249,246,240,0.94);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border-top: 1px solid rgba(176,125,110,0.15);
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-around;
+    padding-top: 10px;
+    padding-bottom: max(16px, env(safe-area-inset-bottom, 0px));
+    z-index: 50;
+  }
+  .nav-item {
+    display: flex; flex-direction: column; align-items: center; gap: 4px;
+    cursor: pointer; padding: 6px 16px; border-radius: 16px;
+    transition: all 0.2s;
+    background: none; border: none;
+  }
+  .nav-item .nav-icon { font-size: 22px; transition: transform 0.3s cubic-bezier(0.34,1.56,0.64,1); }
+  .nav-item.active .nav-icon { transform: scale(1.15); }
+  .nav-item .nav-label { font-size: 11px; font-weight: 500; color: #B07D6E; opacity: 0.5; transition: opacity 0.2s; }
+  .nav-item.active .nav-label { opacity: 1; color: #7A4A3C; font-weight: 600; }
+
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  #confetti-canvas {
+    position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+    pointer-events: none; z-index: 200;
+  }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script>
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => {
+      navigator.serviceWorker.register('./sw.js').catch(() => {});
+    });
+  }
+</script>
+
+<script type="text/babel">
+const { useState, useEffect, useRef, useCallback } = React;
+
+// ─── TWEAKS PANEL (inlined from tweaks-panel.jsx) ─────────────────────────────
+const __TWEAKS_STYLE = `
+  .twk-panel{position:fixed;right:16px;bottom:16px;z-index:2147483646;width:280px;
+    max-height:calc(100vh - 32px);display:flex;flex-direction:column;
+    background:rgba(250,249,247,.78);color:#29261b;
+    -webkit-backdrop-filter:blur(24px) saturate(160%);backdrop-filter:blur(24px) saturate(160%);
+    border:.5px solid rgba(255,255,255,.6);border-radius:14px;
+    box-shadow:0 1px 0 rgba(255,255,255,.5) inset,0 12px 40px rgba(0,0,0,.18);
+    font:11.5px/1.4 ui-sans-serif,system-ui,-apple-system,sans-serif;overflow:hidden}
+  .twk-hd{display:flex;align-items:center;justify-content:space-between;
+    padding:10px 8px 10px 14px;cursor:move;user-select:none}
+  .twk-hd b{font-size:12px;font-weight:600;letter-spacing:.01em}
+  .twk-x{appearance:none;border:0;background:transparent;color:rgba(41,38,27,.55);
+    width:22px;height:22px;border-radius:6px;cursor:default;font-size:13px;line-height:1}
+  .twk-x:hover{background:rgba(0,0,0,.06);color:#29261b}
+  .twk-body{padding:2px 14px 14px;display:flex;flex-direction:column;gap:10px;
+    overflow-y:auto;overflow-x:hidden;min-height:0;
+    scrollbar-width:thin;scrollbar-color:rgba(0,0,0,.15) transparent}
+  .twk-body::-webkit-scrollbar{width:8px}
+  .twk-body::-webkit-scrollbar-track{background:transparent;margin:2px}
+  .twk-body::-webkit-scrollbar-thumb{background:rgba(0,0,0,.15);border-radius:4px;
+    border:2px solid transparent;background-clip:content-box}
+  .twk-row{display:flex;flex-direction:column;gap:5px}
+  .twk-row-h{flex-direction:row;align-items:center;justify-content:space-between;gap:10px}
+  .twk-lbl{display:flex;justify-content:space-between;align-items:baseline;color:rgba(41,38,27,.72)}
+  .twk-lbl>span:first-child{font-weight:500}
+  .twk-val{color:rgba(41,38,27,.5);font-variant-numeric:tabular-nums}
+  .twk-sect{font-size:10px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;
+    color:rgba(41,38,27,.45);padding:10px 0 0}
+  .twk-sect:first-child{padding-top:0}
+  .twk-field{appearance:none;width:100%;height:26px;padding:0 8px;
+    border:.5px solid rgba(0,0,0,.1);border-radius:7px;
+    background:rgba(255,255,255,.6);color:inherit;font:inherit;outline:none}
+  .twk-field:focus{border-color:rgba(0,0,0,.25);background:rgba(255,255,255,.85)}
+  .twk-slider{appearance:none;-webkit-appearance:none;width:100%;height:4px;margin:6px 0;
+    border-radius:999px;background:rgba(0,0,0,.12);outline:none}
+  .twk-slider::-webkit-slider-thumb{-webkit-appearance:none;appearance:none;
+    width:14px;height:14px;border-radius:50%;background:#fff;
+    border:.5px solid rgba(0,0,0,.12);box-shadow:0 1px 3px rgba(0,0,0,.2);cursor:default}
+  .twk-toggle{position:relative;width:32px;height:18px;border:0;border-radius:999px;
+    background:rgba(0,0,0,.15);transition:background .15s;cursor:default;padding:0}
+  .twk-toggle[data-on="1"]{background:#34c759}
+  .twk-toggle i{position:absolute;top:2px;left:2px;width:14px;height:14px;border-radius:50%;
+    background:#fff;box-shadow:0 1px 2px rgba(0,0,0,.25);transition:transform .15s}
+  .twk-toggle[data-on="1"] i{transform:translateX(14px)}
+  .twk-swatch{appearance:none;-webkit-appearance:none;width:56px;height:22px;
+    border:.5px solid rgba(0,0,0,.1);border-radius:6px;padding:0;cursor:default;
+    background:transparent;flex-shrink:0}
+  .twk-swatch::-webkit-color-swatch-wrapper{padding:0}
+  .twk-swatch::-webkit-color-swatch{border:0;border-radius:5.5px}
+  .twk-btn{appearance:none;height:26px;padding:0 12px;border:0;border-radius:7px;
+    background:rgba(0,0,0,.78);color:#fff;font:inherit;font-weight:500;cursor:default}
+  .twk-btn:hover{background:rgba(0,0,0,.88)}
+  .twk-btn.secondary{background:rgba(0,0,0,.06);color:inherit}
+  .twk-btn.secondary:hover{background:rgba(0,0,0,.1)}
+`;
+
+function useTweaks(defaults) {
+  const [values, setValues] = React.useState(defaults);
+  const setTweak = React.useCallback((keyOrEdits, val) => {
+    const edits = typeof keyOrEdits === 'object' && keyOrEdits !== null
+      ? keyOrEdits : { [keyOrEdits]: val };
+    setValues(prev => ({ ...prev, ...edits }));
+  }, []);
+  return [values, setTweak];
+}
+
+function TweaksPanel({ title = 'Settings', children }) {
+  const [open, setOpen] = React.useState(false);
+  const dragRef = React.useRef(null);
+  const offsetRef = React.useRef({ x: 16, y: 16 });
+  const PAD = 16;
+
+  const clamp = React.useCallback(() => {
+    const p = dragRef.current;
+    if (!p) return;
+    const maxR = Math.max(PAD, window.innerWidth - p.offsetWidth - PAD);
+    const maxB = Math.max(PAD, window.innerHeight - p.offsetHeight - PAD);
+    offsetRef.current = {
+      x: Math.min(maxR, Math.max(PAD, offsetRef.current.x)),
+      y: Math.min(maxB, Math.max(PAD, offsetRef.current.y)),
+    };
+    p.style.right = offsetRef.current.x + 'px';
+    p.style.bottom = offsetRef.current.y + 'px';
+  }, []);
+
+  React.useEffect(() => {
+    if (!open) return;
+    clamp();
+    const ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(clamp) : null;
+    if (ro) ro.observe(document.documentElement);
+    else window.addEventListener('resize', clamp);
+    return () => ro ? ro.disconnect() : window.removeEventListener('resize', clamp);
+  }, [open, clamp]);
+
+  React.useEffect(() => {
+    const onMsg = e => {
+      if (e?.data?.type === '__activate_edit_mode') setOpen(true);
+      else if (e?.data?.type === '__deactivate_edit_mode') setOpen(false);
+    };
+    window.addEventListener('message', onMsg);
+    return () => window.removeEventListener('message', onMsg);
+  }, []);
+
+  const dismiss = () => {
+    setOpen(false);
+    window.postMessage({ type: '__deactivate_edit_mode' }, '*');
+  };
+
+  const onDragStart = e => {
+    const panel = dragRef.current;
+    if (!panel) return;
+    const r = panel.getBoundingClientRect();
+    const sx = e.clientX, sy = e.clientY;
+    const startR = window.innerWidth - r.right;
+    const startB = window.innerHeight - r.bottom;
+    const move = ev => {
+      offsetRef.current = { x: startR - (ev.clientX - sx), y: startB - (ev.clientY - sy) };
+      clamp();
+    };
+    const up = () => { window.removeEventListener('mousemove', move); window.removeEventListener('mouseup', up); };
+    window.addEventListener('mousemove', move);
+    window.addEventListener('mouseup', up);
+  };
+
+  if (!open) return null;
+  return (
+    <>
+      <style>{__TWEAKS_STYLE}</style>
+      <div ref={dragRef} className="twk-panel" style={{ right: offsetRef.current.x, bottom: offsetRef.current.y }}>
+        <div className="twk-hd" onMouseDown={onDragStart}>
+          <b>{title}</b>
+          <button className="twk-x" onMouseDown={e => e.stopPropagation()} onClick={dismiss}>✕</button>
+        </div>
+        <div className="twk-body">{children}</div>
+      </div>
+    </>
+  );
+}
+
+function TweakSection({ label, children }) {
+  return <><div className="twk-sect">{label}</div>{children}</>;
+}
+
+function TweakToggle({ label, value, onChange }) {
+  return (
+    <div className="twk-row twk-row-h">
+      <div className="twk-lbl"><span>{label}</span></div>
+      <button type="button" className="twk-toggle" data-on={value ? '1' : '0'}
+        role="switch" aria-checked={!!value} onClick={() => onChange(!value)}><i /></button>
+    </div>
+  );
+}
+
+function TweakColor({ label, value, onChange }) {
+  return (
+    <div className="twk-row twk-row-h">
+      <div className="twk-lbl"><span>{label}</span></div>
+      <input type="color" className="twk-swatch" value={value} onChange={e => onChange(e.target.value)} />
+    </div>
+  );
+}
+
+function TweakButton({ label, onClick, secondary = false }) {
+  return (
+    <button type="button" className={secondary ? 'twk-btn secondary' : 'twk-btn'} onClick={onClick}>{label}</button>
+  );
+}
+
+// ─── THEME ────────────────────────────────────────────────────────────────────
+const TWEAK_DEFAULTS = {
+  accentColor: '#B07D6E',
+  darkAccent: '#7A4A3C',
+  enableConfetti: true,
+};
+
+// ─── SUPABASE ─────────────────────────────────────────────────────────────────
+const { createClient } = window.supabase;
+const supabaseClient = createClient(
+  'https://fowtelstkvcokatlrybk.supabase.co',
+  'sb_publishable_PzcO4nu3-VHL8TdF5_ErWg_SP9sH2UF'
+);
+
+// ─── DATA ─────────────────────────────────────────────────────────────────────
+const HABIT_EMOJIS = ['🌅','💧','🏃','📚','🧘','🥗','💪','✍️','🎯','🌿','😴','🎨'];
+const DAYS = ['M','T','W','T','F','S','S'];
+
+const INITIAL_HABITS = [
+  { id:1, name:'Morning pages', emoji:'✍️', color:'#C4845A', streak:7, goal:1, doneToday:false, history:[1,1,1,1,1,1,0,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,1,1,1,1,1,1], category:'Mind' },
+  { id:2, name:'Drink 8 glasses', emoji:'💧', color:'#7A9CB8', streak:14, goal:8, doneToday:false, history:[1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,1,1,1,1,1,1,1,1,1,1,1,1,1], category:'Body' },
+  { id:3, name:'30 min walk', emoji:'🏃', color:'#8BAF8A', streak:3, goal:1, doneToday:false, history:[0,1,0,1,1,1,1,0,0,1,1,1,0,0,1,1,0,1,1,0,0,1,1,1,0,0,0,1], category:'Body' },
+  { id:4, name:'Read 20 pages', emoji:'📚', color:'#B07D6E', streak:21, goal:20, doneToday:false, history:[1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,0,1,1,1,1,1], category:'Mind' },
+  { id:5, name:'Meditate', emoji:'🧘', color:'#9B8AAE', streak:5, goal:1, doneToday:false, history:[1,0,1,1,1,1,1,0,1,1,0,1,1,1,1,0,1,1,1,1,1,1,0,0,1,1,1,1], category:'Mind' },
+];
+
+// ─── CONFETTI ─────────────────────────────────────────────────────────────────
+function launchConfetti(canvas) {
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+  const W = canvas.width = canvas.offsetWidth;
+  const H = canvas.height = canvas.offsetHeight;
+  const colors = ['#B07D6E','#E8C4A8','#8BAF8A','#9B8AAE','#7A9CB8','#F9D49A','#E07B5A'];
+  const particles = Array.from({length:80}, () => ({
+    x: W/2 + (Math.random()-0.5)*W*0.4, y: H*0.4,
+    vx: (Math.random()-0.5)*8, vy: Math.random()*-12 - 4,
+    size: Math.random()*8+4,
+    color: colors[Math.floor(Math.random()*colors.length)],
+    rot: Math.random()*360, rotV: (Math.random()-0.5)*10,
+    shape: Math.random() > 0.5 ? 'rect' : 'circle',
+    alpha: 1,
+  }));
+  let frame;
+  function draw() {
+    ctx.clearRect(0,0,W,H);
+    let alive = false;
+    particles.forEach(p => {
+      p.x += p.vx; p.y += p.vy; p.vy += 0.35; p.vx *= 0.99;
+      p.rot += p.rotV; p.alpha -= 0.012;
+      if (p.alpha <= 0) return;
+      alive = true;
+      ctx.save();
+      ctx.globalAlpha = Math.max(0, p.alpha);
+      ctx.translate(p.x, p.y);
+      ctx.rotate(p.rot * Math.PI/180);
+      ctx.fillStyle = p.color;
+      if (p.shape === 'rect') ctx.fillRect(-p.size/2, -p.size/4, p.size, p.size/2);
+      else { ctx.beginPath(); ctx.arc(0,0,p.size/2,0,Math.PI*2); ctx.fill(); }
+      ctx.restore();
+    });
+    if (alive) frame = requestAnimationFrame(draw);
+    else ctx.clearRect(0,0,W,H);
+  }
+  draw();
+  return () => cancelAnimationFrame(frame);
+}
+
+// ─── AUTH SCREEN ──────────────────────────────────────────────────────────────
+function AuthScreen({ onAuth }) {
+  const [mode, setMode] = useState('login');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [name, setName] = useState('');
+  const [errors, setErrors] = useState({});
+  const [loading, setLoading] = useState(false);
+  const [showPass, setShowPass] = useState(false);
+  const [confirmEmail, setConfirmEmail] = useState(false);
+
+  function validate() {
+    const e = {};
+    if (mode === 'signup' && !name.trim()) e.name = 'Please enter your name';
+    if (!email.includes('@')) e.email = 'Enter a valid email';
+    if (password.length < 6) e.password = 'At least 6 characters';
+    return e;
+  }
+
+  async function handleSubmit() {
+    const e = validate();
+    if (Object.keys(e).length) { setErrors(e); return; }
+    setErrors({});
+    setLoading(true);
+    if (mode === 'signup') {
+      const { data, error: err } = await supabaseClient.auth.signUp({
+        email,
+        password,
+        options: { data: { name } },
+      });
+      setLoading(false);
+      if (err) { setErrors({ general: err.message }); return; }
+      if (!data.session) { setConfirmEmail(true); return; }
+      onAuth(data.user?.user_metadata?.name || email.split('@')[0]);
+    } else {
+      const { data, error: err } = await supabaseClient.auth.signInWithPassword({ email, password });
+      setLoading(false);
+      if (err) { setErrors({ general: err.message }); return; }
+      onAuth(data.user.user_metadata?.name || email.split('@')[0]);
+    }
+  }
+
+  const Field = ({ id, label, value, onChange, type='text', placeholder, error, right }) => (
+    <div style={{ marginBottom: error ? 12 : 16 }}>
+      <label style={{ fontSize:12, fontWeight:600, color:'#8A6E62', letterSpacing:0.5, textTransform:'uppercase', display:'block', marginBottom:6 }}>{label}</label>
+      <div style={{ position:'relative' }}>
+        <input value={value} onChange={e => { onChange(e.target.value); setErrors(p => ({...p,[id]:undefined})); }}
+          type={type} placeholder={placeholder}
+          style={{
+            width:'100%', height:52, borderRadius:16,
+            border:`1.5px solid ${error ? '#C4585A' : '#E0D4C8'}`,
+            padding:'0 16px', paddingRight: right ? 48 : 16,
+            fontSize:16, color:'#3D2B1F', background:'#FEFCF9',
+            fontFamily:"'DM Sans', sans-serif", outline:'none', transition:'border 0.2s',
+          }}
+          onFocus={e => e.target.style.border=`1.5px solid ${error ? '#C4585A' : '#B07D6E'}`}
+          onBlur={e => e.target.style.border=`1.5px solid ${error ? '#C4585A' : '#E0D4C8'}`}
+        />
+        {right}
+      </div>
+      {error && <p style={{ fontSize:12, color:'#C4585A', marginTop:4, paddingLeft:4 }}>{error}</p>}
+    </div>
+  );
+
+  if (confirmEmail) {
+    return (
+      <div style={{ height:'100%', display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', background:'#F9F6F0', padding:'48px 28px 40px' }}>
+        <div style={{ textAlign:'center', maxWidth:320 }}>
+          <div style={{ fontSize:64, marginBottom:20 }}>📧</div>
+          <h2 style={{ fontFamily:"'DM Serif Display', serif", fontSize:28, color:'#3D2B1F', marginBottom:12 }}>Check your email</h2>
+          <p style={{ fontSize:15, color:'#8A6E62', lineHeight:1.6, marginBottom:32 }}>
+            We sent a confirmation link to <strong style={{ color:'#3D2B1F' }}>{email}</strong>. Click it then come back to log in.
+          </p>
+          <button onClick={() => { setConfirmEmail(false); setMode('login'); }} style={{
+            width:'100%', height:54, borderRadius:18, border:'none',
+            background:'#7A4A3C', color:'#FAF0E6', fontSize:16, fontWeight:700,
+            fontFamily:"'DM Sans', sans-serif", cursor:'pointer',
+            boxShadow:'0 8px 32px rgba(122,74,60,0.3)', transition:'all 0.2s',
+          }}>Back to Log in</button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ height:'100%', display:'flex', flexDirection:'column', background:'#F9F6F0', padding:'48px 28px 40px', overflowY:'auto' }}>
+      <div style={{ display:'flex', flexDirection:'column', alignItems:'center', marginBottom:36 }}>
+        <div style={{ width:72, height:72, borderRadius:24, marginBottom:16, background:'linear-gradient(135deg, #E8D4C4, #F4E8DC)', display:'flex', alignItems:'center', justifyContent:'center', fontSize:36, boxShadow:'0 12px 40px rgba(176,125,110,0.25)' }}>🔥</div>
+        <h1 style={{ fontFamily:"'DM Serif Display', serif", fontSize:28, color:'#3D2B1F' }}>Streak</h1>
+        <p style={{ fontSize:14, color:'#8A6E62', marginTop:4 }}>{mode === 'login' ? 'Welcome back!' : 'Start your streak today.'}</p>
+      </div>
+
+      <div style={{ display:'flex', background:'#EDE6DB', borderRadius:14, padding:4, marginBottom:28, gap:4 }}>
+        {['login','signup'].map(m => (
+          <button key={m} onClick={() => { setMode(m); setErrors({}); }} style={{
+            flex:1, height:38, borderRadius:11, border:'none',
+            background: mode===m ? '#FEFCF9' : 'transparent',
+            color: mode===m ? '#3D2B1F' : '#8A6E62',
+            fontSize:14, fontWeight: mode===m ? 600 : 400, cursor:'pointer',
+            fontFamily:"'DM Sans', sans-serif",
+            boxShadow: mode===m ? '0 2px 8px rgba(61,43,31,0.1)' : 'none',
+            transition:'all 0.2s', textTransform:'capitalize',
+          }}>{m === 'login' ? 'Log in' : 'Sign up'}</button>
+        ))}
+      </div>
+
+      <div style={{ flex:1 }}>
+        {mode === 'signup' && <Field id="name" label="Your name" value={name} onChange={setName} placeholder="e.g. Alex" error={errors.name} />}
+        <Field id="email" label="Email" value={email} onChange={setEmail} type="email" placeholder="you@example.com" error={errors.email} />
+        <Field id="password" label="Password" value={password} onChange={setPassword}
+          type={showPass ? 'text' : 'password'} placeholder="Min. 6 characters" error={errors.password}
+          right={<button onClick={() => setShowPass(p => !p)} style={{ position:'absolute', right:14, top:'50%', transform:'translateY(-50%)', background:'none', border:'none', cursor:'pointer', fontSize:18, color:'#B07D6E' }}>{showPass ? '🙈' : '👁'}</button>}
+        />
+        {mode === 'login' && (
+          <button style={{ background:'none', border:'none', color:'#B07D6E', fontSize:13, fontWeight:500, cursor:'pointer', display:'block', marginTop:-4, marginBottom:20 }}>Forgot password?</button>
+        )}
+      </div>
+
+      {errors.general && (
+        <p style={{ fontSize:13, color:'#C4585A', marginBottom:12, paddingLeft:4 }}>{errors.general}</p>
+      )}
+
+      <button onClick={handleSubmit} disabled={loading} style={{
+        width:'100%', height:58, borderRadius:20, border:'none',
+        background: loading ? '#C4A898' : '#7A4A3C',
+        color:'#FAF0E6', fontSize:17, fontWeight:700,
+        fontFamily:"'DM Sans', sans-serif", cursor:'pointer',
+        boxShadow:'0 8px 32px rgba(122,74,60,0.3)', transition:'all 0.2s',
+        display:'flex', alignItems:'center', justifyContent:'center', gap:10,
+      }}
+        onMouseDown={e => { if (!loading) e.currentTarget.style.transform='scale(0.97)'; }}
+        onMouseUp={e => e.currentTarget.style.transform='scale(1)'}
+      >
+        {loading
+          ? <span style={{ display:'inline-block', width:20, height:20, border:'3px solid rgba(255,255,255,0.3)', borderTopColor:'white', borderRadius:'50%', animation:'spin 0.7s linear infinite' }}/>
+          : (mode === 'login' ? 'Log in' : 'Create account')}
+      </button>
+
+      {mode === 'signup' && (
+        <p style={{ fontSize:11, color:'#A8927E', textAlign:'center', marginTop:16, lineHeight:1.5 }}>By signing up you agree to our Terms &amp; Privacy Policy.</p>
+      )}
+    </div>
+  );
+}
+
+// ─── ONBOARDING ───────────────────────────────────────────────────────────────
+function OnboardingScreen({ onDone, userName }) {
+  const [step, setStep] = useState(0);
+  const steps = [
+    { emoji:'🌱', title:`Welcome,\n${userName || 'friend'}!`, sub:'Build habits that actually stick — one tiny win at a time.', cta:'Get started' },
+    { emoji:'🔥', title:'Protect your\nstreak.', sub:"Every day you show up counts. Don't break the chain.", cta:'Keep going' },
+    { emoji:'🎉', title:"You've got\nthis.", sub:'Track, reflect, celebrate. Becoming consistent starts today.', cta:"Let's go!" },
+  ];
+  const s = steps[step];
+  return (
+    <div style={{ height:'100%', display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'space-between', padding:'40px 32px 48px', background:'#F9F6F0' }}>
+      <div style={{ display:'flex', gap:8 }}>
+        {steps.map((_,i) => (
+          <div key={i} style={{ width: i===step ? 24 : 8, height:8, borderRadius:4, background: i===step ? '#B07D6E' : '#E0D4C8', transition:'all 0.4s cubic-bezier(0.34,1.56,0.64,1)' }}/>
+        ))}
+      </div>
+      <div style={{ display:'flex', flexDirection:'column', alignItems:'center', gap:28 }}>
+        <div style={{ width:160, height:160, borderRadius:48, background:'linear-gradient(135deg, #E8D4C4, #F4E8DC)', display:'flex', alignItems:'center', justifyContent:'center', fontSize:72, boxShadow:'0 20px 60px rgba(176,125,110,0.25)', transform:'rotate(-3deg)' }}>
+          {s.emoji}
+        </div>
+        <div style={{ textAlign:'center' }}>
+          <h1 style={{ fontFamily:"'DM Serif Display', serif", fontSize:38, lineHeight:1.15, color:'#3D2B1F', whiteSpace:'pre-line', marginBottom:16 }}>{s.title}</h1>
+          <p style={{ fontSize:17, color:'#8A6E62', lineHeight:1.55, maxWidth:280 }}>{s.sub}</p>
+        </div>
+      </div>
+      <div style={{ width:'100%', display:'flex', flexDirection:'column', gap:16 }}>
+        <button onClick={() => step < steps.length-1 ? setStep(step+1) : onDone()}
+          style={{ width:'100%', height:60, borderRadius:20, border:'none', background:'#7A4A3C', color:'#FAF0E6', fontSize:17, fontWeight:700, fontFamily:"'DM Sans', sans-serif", cursor:'pointer', letterSpacing:0.3, boxShadow:'0 8px 32px rgba(122,74,60,0.35)', transition:'transform 0.15s' }}
+          onMouseDown={e => e.currentTarget.style.transform='scale(0.97)'}
+          onMouseUp={e => e.currentTarget.style.transform='scale(1)'}
+        >{s.cta}</button>
+        {step < steps.length-1 && <button onClick={onDone} style={{ background:'none', border:'none', color:'#B07D6E', fontSize:15, fontWeight:500, cursor:'pointer' }}>Skip</button>}
+      </div>
+    </div>
+  );
+}
+
+// ─── TODAY SCREEN ─────────────────────────────────────────────────────────────
+function TodayScreen({ habits, setHabits, onHabitTap, tweak, confettiRef, onAddHabit }) {
+  const now = new Date();
+  const dateStr = now.toLocaleDateString('en-US', { weekday:'long', month:'long', day:'numeric' });
+  const doneCnt = habits.filter(h => h.doneToday).length;
+  const pct = habits.length ? doneCnt/habits.length : 0;
+
+  function handleCheck(id) {
+    setHabits(prev => prev.map(h => {
+      if (h.id !== id) return h;
+      const newDone = !h.doneToday;
+      if (newDone && tweak.enableConfetti) launchConfetti(confettiRef.current);
+      return { ...h, doneToday: newDone, streak: newDone ? h.streak+1 : Math.max(0,h.streak-1) };
+    }));
+  }
+
+  const allDone = doneCnt === habits.length && habits.length > 0;
+
+  return (
+    <div style={{ padding:'12px 20px 0' }}>
+      <div style={{ marginBottom:24 }}>
+        <p style={{ fontSize:13, fontWeight:500, color:'#B07D6E', letterSpacing:1, textTransform:'uppercase', marginBottom:4 }}>{dateStr}</p>
+        <h2 style={{ fontFamily:"'DM Serif Display', serif", fontSize:30, color:'#3D2B1F', lineHeight:1.15 }}>
+          {allDone ? 'Perfect day! 🎉' : doneCnt === 0 ? 'Ready to start?' : `${doneCnt} down, ${habits.length - doneCnt} to go`}
+        </h2>
+      </div>
+
+      <div style={{ background:'#EDE6DB', borderRadius:24, padding:'20px', marginBottom:20, display:'flex', alignItems:'center', gap:20 }}>
+        <ProgressRing pct={pct} size={76} stroke={7} color={tweak.accentColor} />
+        <div>
+          <p style={{ fontSize:28, fontWeight:700, color:'#3D2B1F', fontFamily:"'DM Serif Display', serif" }}>{doneCnt}/{habits.length}</p>
+          <p style={{ fontSize:14, color:'#8A6E62', marginTop:2 }}>habits completed today</p>
+          {pct > 0 && <p style={{ fontSize:12, color:'#B07D6E', marginTop:6, fontWeight:600 }}>
+            {pct === 1 ? '🏆 All done!' : pct >= 0.5 ? '🔥 On fire!' : '⚡ Keep going!'}
+          </p>}
+        </div>
+      </div>
+
+      <div style={{ display:'flex', flexDirection:'column', gap:12 }}>
+        {habits.map(h => (
+          <HabitCard key={h.id} habit={h} onCheck={() => handleCheck(h.id)} onTap={() => onHabitTap(h)} onDelete={id => setHabits(prev => prev.filter(h => h.id !== id))} />
+        ))}
+      </div>
+
+      <button onClick={onAddHabit} style={{
+        width:'100%', height:56, borderRadius:18, border:'2px dashed #D4C4B8',
+        background:'transparent', color:'#B07D6E', fontSize:15, fontWeight:600,
+        cursor:'pointer', marginTop:16, display:'flex', alignItems:'center', justifyContent:'center', gap:8,
+        fontFamily:"'DM Sans', sans-serif",
+      }}>
+        <span style={{ fontSize:20 }}>+</span> Add habit
+      </button>
+    </div>
+  );
+}
+
+function ProgressRing({ pct, size=80, stroke=8, color='#B07D6E' }) {
+  const r = (size - stroke) / 2;
+  const circ = 2 * Math.PI * r;
+  return (
+    <svg width={size} height={size} style={{ transform:'rotate(-90deg)', flexShrink:0 }}>
+      <circle cx={size/2} cy={size/2} r={r} fill="none" stroke="#D4C4B4" strokeWidth={stroke}/>
+      <circle cx={size/2} cy={size/2} r={r} fill="none" stroke={color} strokeWidth={stroke}
+        strokeDasharray={`${circ*pct} ${circ}`} strokeLinecap="round"
+        style={{ transition:'stroke-dasharray 0.6s cubic-bezier(0.34,1.2,0.64,1)' }}/>
+    </svg>
+  );
+}
+
+function HabitCard({ habit, onCheck, onTap, onDelete }) {
+  const [pressing, setPressing] = useState(false);
+  const [swipeX, setSwipeX] = useState(0);
+  const [swiping, setSwiping] = useState(false);
+  const [deleted, setDeleted] = useState(false);
+  const startXRef = useRef(null);
+  const mouseDownX = useRef(null);
+  const DELETE_THRESHOLD = -80;
+
+  function onTouchStart(e) { startXRef.current = e.touches[0].clientX; setSwiping(false); }
+  function onTouchMove(e) {
+    if (startXRef.current === null) return;
+    const dx = e.touches[0].clientX - startXRef.current;
+    if (dx < -5) { setSwiping(true); setSwipeX(Math.max(-110, dx)); }
+    else if (dx > 5) setSwipeX(0);
+  }
+  function onTouchEnd() {
+    setSwipeX(swipeX < DELETE_THRESHOLD ? -110 : 0);
+    setSwiping(false);
+    startXRef.current = null;
+  }
+  function onMouseDown(e) { mouseDownX.current = e.clientX; }
+  function onMouseMove(e) {
+    if (mouseDownX.current === null) return;
+    const dx = e.clientX - mouseDownX.current;
+    if (dx < -5) { setSwiping(true); setSwipeX(Math.max(-110, dx)); }
+  }
+  function onMouseUp() {
+    setSwipeX(swipeX < DELETE_THRESHOLD ? -110 : 0);
+    setSwiping(false);
+    mouseDownX.current = null;
+  }
+  function handleDelete() { setDeleted(true); setTimeout(() => onDelete(habit.id), 300); }
+  if (deleted) return null;
+
+  const revealed = swipeX <= -80;
+  return (
+    <div style={{ position:'relative', borderRadius:20, overflow:'hidden' }}>
+      <div style={{ position:'absolute', right:0, top:0, bottom:0, width:110, background:'#C4585A', display:'flex', alignItems:'center', justifyContent:'center', borderRadius:20 }}>
+        <button onClick={handleDelete} style={{ width:'100%', height:'100%', background:'none', border:'none', cursor:'pointer', display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', gap:4 }}>
+          <span style={{ fontSize:22 }}>🗑</span>
+          <span style={{ fontSize:12, color:'white', fontWeight:600 }}>Remove</span>
+        </button>
+      </div>
+      <div
+        onClick={() => { if (swipeX === 0) onTap(); else setSwipeX(0); }}
+        onTouchStart={onTouchStart} onTouchMove={onTouchMove} onTouchEnd={onTouchEnd}
+        onMouseDown={e => { setPressing(true); onMouseDown(e); }}
+        onMouseMove={onMouseMove}
+        onMouseUp={() => { setPressing(false); onMouseUp(); }}
+        onMouseLeave={() => { setPressing(false); if (!swiping) mouseDownX.current = null; }}
+        style={{
+          background: habit.doneToday ? `${habit.color}18` : '#FFFFFF',
+          border: `1.5px solid ${habit.doneToday ? habit.color+'55' : '#EDE6DB'}`,
+          borderRadius:20, padding:'14px 16px',
+          display:'flex', alignItems:'center', gap:14, cursor:'pointer',
+          transform: `translateX(${swipeX}px) scale(${pressing && swipeX === 0 ? 0.98 : 1})`,
+          transition: swiping ? 'none' : 'transform 0.3s cubic-bezier(0.34,1.2,0.64,1)',
+          boxShadow: habit.doneToday ? `0 4px 20px ${habit.color}22` : '0 2px 8px rgba(61,43,31,0.06)',
+          position:'relative', zIndex:1, userSelect:'none',
+        }}
+      >
+        <div style={{ width:44, height:44, borderRadius:14, background:`${habit.color}20`, display:'flex', alignItems:'center', justifyContent:'center', fontSize:22, flexShrink:0 }}>{habit.emoji}</div>
+        <div style={{ flex:1, minWidth:0 }}>
+          <p style={{ fontSize:16, fontWeight:600, color:'#3D2B1F', textDecoration: habit.doneToday ? 'line-through' : 'none', opacity: habit.doneToday ? 0.6 : 1 }}>{habit.name}</p>
+          <div style={{ display:'flex', alignItems:'center', gap:6, marginTop:3 }}>
+            <span style={{ fontSize:12, color:'#B07D6E' }}>🔥 {habit.streak} day streak</span>
+            <span style={{ width:3, height:3, borderRadius:'50%', background:'#D4C4B8' }}></span>
+            <span style={{ fontSize:12, color:'#A8927E' }}>{habit.category}</span>
+          </div>
+        </div>
+        {!revealed
+          ? <CheckButton checked={habit.doneToday} color={habit.color} onToggle={e => { e.stopPropagation(); onCheck(); }} />
+          : <span style={{ fontSize:13, color:'#C4585A', fontWeight:600, flexShrink:0 }}>Delete →</span>}
+      </div>
+    </div>
+  );
+}
+
+function CheckButton({ checked, color, onToggle }) {
+  return (
+    <button onClick={onToggle} style={{
+      width:36, height:36, borderRadius:12, border:`2px solid ${checked ? color : '#D4C4B8'}`,
+      background: checked ? color : 'transparent',
+      display:'flex', alignItems:'center', justifyContent:'center',
+      cursor:'pointer', flexShrink:0,
+      transform: checked ? 'scale(1.1)' : 'scale(1)',
+      transition:'all 0.3s cubic-bezier(0.34,1.56,0.64,1)',
+      boxShadow: checked ? `0 4px 16px ${color}55` : 'none',
+    }}>
+      {checked && <svg width="16" height="12" viewBox="0 0 16 12" fill="none"><path d="M1.5 6L6 10.5L14.5 1.5" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/></svg>}
+    </button>
+  );
+}
+
+// ─── HABIT DETAIL ─────────────────────────────────────────────────────────────
+function HabitDetailScreen({ habit, onBack }) {
+  if (!habit) return null;
+  const hist = [...habit.history].slice(-28);
+  const weeks = Array.from({length:4}, (_, w) => hist.slice(w*7, (w+1)*7));
+  const rate = Math.round((hist.filter(Boolean).length / hist.length) * 100);
+  return (
+    <div style={{ padding:'12px 20px 0' }}>
+      <button onClick={onBack} style={{ background:'none', border:'none', fontSize:24, cursor:'pointer', color:'#7A4A3C', marginBottom:16 }}>←</button>
+      <div style={{ background:`linear-gradient(135deg, ${habit.color}30, ${habit.color}10)`, borderRadius:28, padding:'28px 24px', marginBottom:20, position:'relative', overflow:'hidden' }}>
+        <div style={{ fontSize:56, marginBottom:12 }}>{habit.emoji}</div>
+        <h2 style={{ fontFamily:"'DM Serif Display', serif", fontSize:28, color:'#3D2B1F', marginBottom:6 }}>{habit.name}</h2>
+        <p style={{ fontSize:14, color:'#8A6E62' }}>{habit.category}</p>
+        <div style={{ position:'absolute', right:24, bottom:24, textAlign:'right' }}>
+          <div style={{ fontSize:42, fontWeight:800, color:habit.color, fontFamily:"'DM Serif Display', serif", lineHeight:1 }}>{habit.streak}</div>
+          <div style={{ fontSize:12, color:'#8A6E62', fontWeight:500 }}>day streak 🔥</div>
+        </div>
+      </div>
+      <div style={{ display:'flex', gap:12, marginBottom:20 }}>
+        {[{label:'Completion', value:`${rate}%`},{label:'Best streak', value:`${habit.streak}d`},{label:'This week', value:`${weeks[3].filter(Boolean).length}/7`}].map(s => (
+          <div key={s.label} style={{ flex:1, background:'#EDE6DB', borderRadius:18, padding:'14px 12px', textAlign:'center' }}>
+            <div style={{ fontSize:22, fontWeight:700, color:'#3D2B1F', fontFamily:"'DM Serif Display', serif" }}>{s.value}</div>
+            <div style={{ fontSize:11, color:'#8A6E62', marginTop:2 }}>{s.label}</div>
+          </div>
+        ))}
+      </div>
+      <div style={{ background:'#FFFFFF', borderRadius:22, padding:20, marginBottom:20 }}>
+        <h3 style={{ fontSize:15, fontWeight:600, color:'#3D2B1F', marginBottom:16 }}>Past 4 weeks</h3>
+        <div style={{ display:'flex', gap:8, marginBottom:8 }}>
+          {DAYS.map((d,i) => <div key={i} style={{ flex:1, textAlign:'center', fontSize:11, color:'#B0927E', fontWeight:500 }}>{d}</div>)}
+        </div>
+        <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
+          {weeks.map((week, wi) => (
+            <div key={wi} style={{ display:'flex', gap:8 }}>
+              {week.map((done, di) => (
+                <div key={di} style={{ flex:1, aspectRatio:'1', borderRadius:10, background: done ? habit.color : '#EDE6DB', opacity: done ? (0.5 + wi*0.15) : 1, transition:'all 0.3s' }}/>
+              ))}
+            </div>
+          ))}
+        </div>
+      </div>
+      <div style={{ background:`${habit.color}15`, borderRadius:22, padding:'20px', borderLeft:`4px solid ${habit.color}` }}>
+        <p style={{ fontFamily:"'DM Serif Display', serif", fontStyle:'italic', fontSize:17, color:'#3D2B1F', lineHeight:1.5 }}>"Every action you take is a vote for the type of person you wish to become."</p>
+        <p style={{ fontSize:12, color:'#8A6E62', marginTop:8 }}>— James Clear</p>
+      </div>
+    </div>
+  );
+}
+
+// ─── CREATE HABIT ─────────────────────────────────────────────────────────────
+function CreateHabitScreen({ onBack, onSave }) {
+  const [name, setName] = useState('');
+  const [selectedEmoji, setSelectedEmoji] = useState('🎯');
+  const [selectedColor, setSelectedColor] = useState('#B07D6E');
+  const [category, setCategory] = useState('Mind');
+  const COLORS = ['#B07D6E','#8BAF8A','#7A9CB8','#9B8AAE','#C4845A','#7A9C8A','#A8856E','#7B9CAF'];
+  const CATS = ['Mind','Body','Soul','Work'];
+  return (
+    <div style={{ padding:'12px 20px 0' }}>
+      <button onClick={onBack} style={{ background:'none', border:'none', fontSize:24, cursor:'pointer', color:'#7A4A3C', marginBottom:16 }}>←</button>
+      <h2 style={{ fontFamily:"'DM Serif Display', serif", fontSize:30, color:'#3D2B1F', marginBottom:24 }}>New habit</h2>
+      <div style={{ marginBottom:20 }}>
+        <label style={{ fontSize:13, fontWeight:600, color:'#8A6E62', letterSpacing:0.5, textTransform:'uppercase', display:'block', marginBottom:8 }}>Name</label>
+        <input value={name} onChange={e => setName(e.target.value)} placeholder="e.g. Read every morning…"
+          style={{ width:'100%', height:52, borderRadius:16, border:'1.5px solid #E0D4C8', padding:'0 16px', fontSize:16, color:'#3D2B1F', background:'#FEFCF9', fontFamily:"'DM Sans', sans-serif", outline:'none' }}
+          onFocus={e => e.target.style.border='1.5px solid #B07D6E'}
+          onBlur={e => e.target.style.border='1.5px solid #E0D4C8'}
+        />
+      </div>
+      <div style={{ marginBottom:20 }}>
+        <label style={{ fontSize:13, fontWeight:600, color:'#8A6E62', letterSpacing:0.5, textTransform:'uppercase', display:'block', marginBottom:8 }}>Icon</label>
+        <div style={{ display:'flex', flexWrap:'wrap', gap:8 }}>
+          {HABIT_EMOJIS.map(e => (
+            <button key={e} onClick={() => setSelectedEmoji(e)} style={{ width:48, height:48, borderRadius:14, border:`2px solid ${selectedEmoji===e ? '#B07D6E' : '#E0D4C8'}`, background: selectedEmoji===e ? '#FAF0E6' : '#FEFCF9', fontSize:22, cursor:'pointer', transform: selectedEmoji===e ? 'scale(1.1)' : 'scale(1)', transition:'all 0.2s cubic-bezier(0.34,1.56,0.64,1)' }}>{e}</button>
+          ))}
+        </div>
+      </div>
+      <div style={{ marginBottom:20 }}>
+        <label style={{ fontSize:13, fontWeight:600, color:'#8A6E62', letterSpacing:0.5, textTransform:'uppercase', display:'block', marginBottom:8 }}>Color</label>
+        <div style={{ display:'flex', gap:10 }}>
+          {COLORS.map(c => (
+            <button key={c} onClick={() => setSelectedColor(c)} style={{ width:36, height:36, borderRadius:'50%', border:`3px solid ${selectedColor===c ? '#3D2B1F' : 'transparent'}`, background:c, cursor:'pointer', transform: selectedColor===c ? 'scale(1.2)' : 'scale(1)', transition:'all 0.2s cubic-bezier(0.34,1.56,0.64,1)' }}/>
+          ))}
+        </div>
+      </div>
+      <div style={{ marginBottom:32 }}>
+        <label style={{ fontSize:13, fontWeight:600, color:'#8A6E62', letterSpacing:0.5, textTransform:'uppercase', display:'block', marginBottom:8 }}>Category</label>
+        <div style={{ display:'flex', gap:8 }}>
+          {CATS.map(c => (
+            <button key={c} onClick={() => setCategory(c)} style={{ flex:1, height:40, borderRadius:12, border:'none', background: category===c ? '#7A4A3C' : '#EDE6DB', color: category===c ? '#FAF0E6' : '#7A5A4A', fontSize:14, fontWeight:600, cursor:'pointer', fontFamily:"'DM Sans', sans-serif", transition:'all 0.2s' }}>{c}</button>
+          ))}
+        </div>
+      </div>
+      <div style={{ background:`${selectedColor}18`, border:`1.5px solid ${selectedColor}44`, borderRadius:20, padding:'14px 16px', display:'flex', alignItems:'center', gap:14, marginBottom:24 }}>
+        <div style={{ width:44, height:44, borderRadius:14, background:`${selectedColor}30`, display:'flex', alignItems:'center', justifyContent:'center', fontSize:22 }}>{selectedEmoji}</div>
+        <div>
+          <p style={{ fontSize:16, fontWeight:600, color:'#3D2B1F' }}>{name || 'Your new habit'}</p>
+          <p style={{ fontSize:12, color:'#B07D6E', marginTop:2 }}>🔥 0 day streak · {category}</p>
+        </div>
+      </div>
+      <button onClick={() => name && onSave({ id: Date.now(), name, emoji:selectedEmoji, color:selectedColor, streak:0, goal:1, doneToday:false, history:[], category })}
+        style={{ width:'100%', height:56, borderRadius:18, border:'none', background: name ? '#7A4A3C' : '#D4C4B8', color: name ? '#FAF0E6' : '#A89080', fontSize:16, fontWeight:700, cursor: name ? 'pointer' : 'default', fontFamily:"'DM Sans', sans-serif", transition:'all 0.3s', boxShadow: name ? '0 8px 28px rgba(122,74,60,0.3)' : 'none' }}>
+        Create habit
+      </button>
+    </div>
+  );
+}
+
+// ─── STATS SCREEN ─────────────────────────────────────────────────────────────
+function StatsScreen({ habits }) {
+  const [period, setPeriod] = useState('week');
+  const totalStreak = habits.reduce((a,h) => a+h.streak, 0);
+  const bestStreak = habits.reduce((a,h) => Math.max(a,h.streak), 0);
+  const avgRate = Math.round(habits.reduce((a,h) => a + (h.history.filter(Boolean).length/Math.max(h.history.length,1)*100), 0) / Math.max(habits.length,1));
+  const weekBars = [62,75,58,90,100,88,72];
+  return (
+    <div style={{ padding:'12px 20px 0' }}>
+      <h2 style={{ fontFamily:"'DM Serif Display', serif", fontSize:30, color:'#3D2B1F', marginBottom:6 }}>Your progress</h2>
+      <p style={{ fontSize:14, color:'#8A6E62', marginBottom:20 }}>Keep showing up. It compounds.</p>
+      <div style={{ display:'flex', background:'#EDE6DB', borderRadius:14, padding:4, marginBottom:20, gap:4 }}>
+        {['week','month','all'].map(p => (
+          <button key={p} onClick={() => setPeriod(p)} style={{ flex:1, height:36, borderRadius:11, border:'none', background: period===p ? '#FEFCF9' : 'transparent', color: period===p ? '#3D2B1F' : '#8A6E62', fontSize:14, fontWeight: period===p ? 600 : 400, cursor:'pointer', fontFamily:"'DM Sans', sans-serif", boxShadow: period===p ? '0 2px 8px rgba(61,43,31,0.1)' : 'none', transition:'all 0.2s', textTransform:'capitalize' }}>{p}</button>
+        ))}
+      </div>
+      <div style={{ display:'flex', gap:10, marginBottom:16 }}>
+        {[{label:'Total streak days',val:totalStreak,icon:'🔥'},{label:'Best streak',val:`${bestStreak}d`,icon:'🏆'},{label:'Avg completion',val:`${avgRate}%`,icon:'📈'}].map(k => (
+          <div key={k.label} style={{ flex:1, background:'#FFFFFF', borderRadius:18, padding:'14px 10px', textAlign:'center', boxShadow:'0 2px 12px rgba(61,43,31,0.06)' }}>
+            <div style={{ fontSize:20 }}>{k.icon}</div>
+            <div style={{ fontSize:22, fontWeight:700, color:'#3D2B1F', fontFamily:"'DM Serif Display', serif", marginTop:4 }}>{k.val}</div>
+            <div style={{ fontSize:10, color:'#8A6E62', marginTop:2, lineHeight:1.3 }}>{k.label}</div>
+          </div>
+        ))}
+      </div>
+      <div style={{ background:'#FFFFFF', borderRadius:22, padding:'20px', marginBottom:16, boxShadow:'0 2px 12px rgba(61,43,31,0.06)' }}>
+        <h3 style={{ fontSize:15, fontWeight:600, color:'#3D2B1F', marginBottom:16 }}>Completion this week</h3>
+        <div style={{ display:'flex', alignItems:'flex-end', gap:8, height:100 }}>
+          {weekBars.map((v,i) => (
+            <div key={i} style={{ flex:1, display:'flex', flexDirection:'column', alignItems:'center', gap:4 }}>
+              <div style={{ width:'100%', height:`${v}%`, borderRadius:'6px 6px 0 0', background:'linear-gradient(180deg, #B07D6E, #7A4A3C)', opacity: i === new Date().getDay() ? 1 : 0.5, transition:'height 0.6s cubic-bezier(0.34,1.2,0.64,1)', minHeight:4 }}/>
+              <span style={{ fontSize:10, color:'#8A6E62' }}>{DAYS[i]}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+      <h3 style={{ fontSize:15, fontWeight:600, color:'#3D2B1F', marginBottom:12 }}>By habit</h3>
+      <div style={{ display:'flex', flexDirection:'column', gap:10 }}>
+        {habits.map(h => {
+          const rate = Math.round((h.history.filter(Boolean).length / Math.max(h.history.length,1)) * 100);
+          return (
+            <div key={h.id} style={{ background:'#FFFFFF', borderRadius:18, padding:'14px 16px', boxShadow:'0 2px 8px rgba(61,43,31,0.05)' }}>
+              <div style={{ display:'flex', alignItems:'center', gap:10, marginBottom:8 }}>
+                <span style={{ fontSize:20 }}>{h.emoji}</span>
+                <span style={{ flex:1, fontSize:14, fontWeight:600, color:'#3D2B1F' }}>{h.name}</span>
+                <span style={{ fontSize:13, fontWeight:700, color:h.color }}>{rate}%</span>
+              </div>
+              <div style={{ height:6, borderRadius:3, background:'#EDE6DB', overflow:'hidden' }}>
+                <div style={{ height:'100%', width:`${rate}%`, borderRadius:3, background:h.color, transition:'width 0.8s cubic-bezier(0.34,1.2,0.64,1)' }}/>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ─── REFLECT SCREEN ────────────────────────────────────────────────────────────
+function ReflectScreen({ habits }) {
+  const [entry, setEntry] = useState('');
+  const [saved, setSaved] = useState(false);
+  const [promptIdx, setPromptIdx] = useState(0);
+  const prompts = [
+    'What went well today?',
+    'What got in your way?',
+    'What will you do differently?',
+    'What are you proud of this week?',
+  ];
+
+  function handleSave() {
+    if (!entry.trim()) return;
+    try {
+      const existing = JSON.parse(localStorage.getItem('streak_journal') || '[]');
+      const updated = [{ text: entry, date: new Date().toISOString(), prompt: prompts[promptIdx] }, ...existing].slice(0, 50);
+      localStorage.setItem('streak_journal', JSON.stringify(updated));
+    } catch {}
+    setSaved(true);
+    setTimeout(() => setSaved(false), 2000);
+    setEntry('');
+  }
+
+  return (
+    <div style={{ padding:'12px 20px 0' }}>
+      <h2 style={{ fontFamily:"'DM Serif Display', serif", fontSize:30, color:'#3D2B1F', marginBottom:6 }}>Reflect</h2>
+      <p style={{ fontSize:14, color:'#8A6E62', marginBottom:20 }}>A moment to pause and check in.</p>
+      <div style={{ background:'#EDE6DB', borderRadius:22, padding:'18px 16px', marginBottom:20 }}>
+        <p style={{ fontSize:14, fontWeight:600, color:'#3D2B1F', marginBottom:12 }}>How are you feeling today?</p>
+        <div style={{ display:'flex', justifyContent:'space-between' }}>
+          {['😫','😔','😐','🙂','😄'].map((m,i) => <MoodButton key={i} emoji={m} />)}
+        </div>
+      </div>
+      <div style={{ background:'#FFFFFF', borderRadius:22, padding:'18px 16px', marginBottom:16, boxShadow:'0 2px 12px rgba(61,43,31,0.06)' }}>
+        <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:10 }}>
+          <p style={{ fontSize:14, fontWeight:600, color:'#3D2B1F' }}>{prompts[promptIdx]}</p>
+          <button onClick={() => setPromptIdx((promptIdx+1) % prompts.length)} style={{ background:'none', border:'none', fontSize:18, cursor:'pointer' }}>↻</button>
+        </div>
+        <textarea value={entry} onChange={e => setEntry(e.target.value)} placeholder="Write your thoughts…"
+          style={{ width:'100%', minHeight:120, border:'none', outline:'none', resize:'none', fontSize:15, color:'#3D2B1F', lineHeight:1.6, background:'transparent', fontFamily:"'DM Sans', sans-serif" }}
+        />
+        <button onClick={handleSave} style={{ width:'100%', height:44, borderRadius:14, border:'none', background: saved ? '#8BAF8A' : (entry ? '#7A4A3C' : '#E0D4C8'), color: entry || saved ? '#FAF0E6' : '#A89080', fontSize:14, fontWeight:600, cursor: entry ? 'pointer' : 'default', fontFamily:"'DM Sans', sans-serif", transition:'all 0.3s' }}>
+          {saved ? '✓ Saved!' : 'Save entry'}
+        </button>
+      </div>
+      <div style={{ background:'#FEFCF9', borderRadius:22, padding:'18px 16px', border:'1.5px solid #E8DDD4' }}>
+        <h3 style={{ fontSize:15, fontWeight:600, color:'#3D2B1F', marginBottom:14 }}>Today at a glance</h3>
+        <div style={{ display:'flex', flexDirection:'column', gap:10 }}>
+          {habits.slice(0,4).map(h => (
+            <div key={h.id} style={{ display:'flex', alignItems:'center', gap:10 }}>
+              <span style={{ fontSize:18 }}>{h.emoji}</span>
+              <span style={{ flex:1, fontSize:14, color:'#3D2B1F' }}>{h.name}</span>
+              <div style={{ width:24, height:24, borderRadius:8, background: h.doneToday ? h.color : '#EDE6DB', display:'flex', alignItems:'center', justifyContent:'center' }}>
+                {h.doneToday && <svg width="10" height="8" viewBox="0 0 10 8" fill="none"><path d="M1 4L3.5 6.5L9 1" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function MoodButton({ emoji }) {
+  const [selected, setSelected] = useState(false);
+  return (
+    <button onClick={() => setSelected(!selected)} style={{ width:50, height:50, borderRadius:16, border:`2px solid ${selected ? '#B07D6E' : 'transparent'}`, background: selected ? '#FAF0E6' : 'transparent', fontSize:26, cursor:'pointer', transform: selected ? 'scale(1.2)' : 'scale(1)', transition:'all 0.25s cubic-bezier(0.34,1.56,0.64,1)' }}>{emoji}</button>
+  );
+}
+
+// ─── ROOT APP ─────────────────────────────────────────────────────────────────
+function App() {
+  const [tweak, setTweak] = useTweaks(TWEAK_DEFAULTS);
+
+  const [authDone, setAuthDone] = useState(false);
+  const [authLoading, setAuthLoading] = useState(true);
+  const [userName, setUserName] = useState('');
+  const [showOnboarding, setShowOnboarding] = useState(false);
+  const [tab, setTab] = useState('today');
+
+  // Persist habits with daily reset
+  const [habits, setHabits] = useState(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem('streak_habits') || 'null');
+      if (!saved) return INITIAL_HABITS;
+      const lastDate = localStorage.getItem('streak_lastDate');
+      const today = new Date().toDateString();
+      if (lastDate !== today) {
+        localStorage.setItem('streak_lastDate', today);
+        return saved.map(h => ({ ...h, doneToday: false }));
+      }
+      return saved;
+    } catch { return INITIAL_HABITS; }
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('streak_habits', JSON.stringify(habits));
+      localStorage.setItem('streak_lastDate', new Date().toDateString());
+    } catch {}
+  }, [habits]);
+
+  useEffect(() => {
+    supabaseClient.auth.getSession().then(({ data: { session } }) => {
+      if (session?.user) {
+        const n = session.user.user_metadata?.name || session.user.email?.split('@')[0] || 'friend';
+        setUserName(n);
+        setAuthDone(true);
+      }
+      setAuthLoading(false);
+    });
+    const { data: { subscription } } = supabaseClient.auth.onAuthStateChange((event, session) => {
+      if (event === 'SIGNED_OUT') {
+        setAuthDone(false);
+        setUserName('');
+        setShowOnboarding(false);
+      }
+    });
+    return () => subscription.unsubscribe();
+  }, []);
+
+  const [selectedHabit, setSelectedHabit] = useState(null);
+  const [showCreate, setShowCreate] = useState(false);
+  const confettiRef = useRef(null);
+
+  const isDetail = !!selectedHabit && tab === 'today';
+  const isCreate = showCreate;
+
+  function handleAuth(name) {
+    setUserName(name);
+    setAuthDone(true);
+    setShowOnboarding(true);
+  }
+
+  async function handleSignOut() {
+    await supabaseClient.auth.signOut();
+    setAuthDone(false);
+    setUserName('');
+    setShowOnboarding(false);
+    window.postMessage({ type: '__deactivate_edit_mode' }, '*');
+  }
+
+  function getScreenClass(name) {
+    if (!authDone) return name === 'auth' ? '' : 'hidden-right';
+    if (showOnboarding) return name === 'onboarding' ? '' : 'hidden-right';
+    if (isCreate) return name === 'create' ? '' : 'hidden-left';
+    if (isDetail) return name === 'detail' ? '' : 'hidden-left';
+    return name === tab ? '' : 'hidden-right';
+  }
+
+  if (authLoading) {
+    return (
+      <div style={{ height:'100%', display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', background:'#F9F6F0', gap:20 }}>
+        <div style={{ fontSize:56 }}>🔥</div>
+        <div style={{ width:32, height:32, border:'3px solid #E0D4C8', borderTopColor:'#B07D6E', borderRadius:'50%', animation:'spin 0.7s linear infinite' }} />
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ position:'relative', width:'100%', height:'100%' }}>
+      <canvas ref={confettiRef} id="confetti-canvas"/>
+
+      <div className="screen-container">
+        {/* Auth */}
+        <div className={`screen no-nav ${getScreenClass('auth')}`} style={{ paddingTop: 0 }}>
+          <AuthScreen onAuth={handleAuth} />
+        </div>
+
+        {/* Onboarding */}
+        <div className={`screen no-nav ${getScreenClass('onboarding')}`} style={{ paddingTop: 0 }}>
+          <OnboardingScreen onDone={() => setShowOnboarding(false)} userName={userName} />
+        </div>
+
+        {/* Today */}
+        <div className={`screen ${getScreenClass('today')}`}>
+          <TodayScreen habits={habits} setHabits={setHabits} onHabitTap={h => setSelectedHabit(h)} tweak={tweak} confettiRef={confettiRef} onAddHabit={() => setShowCreate(true)} />
+        </div>
+
+        {/* Stats */}
+        <div className={`screen ${getScreenClass('stats')}`}>
+          <StatsScreen habits={habits} />
+        </div>
+
+        {/* Reflect */}
+        <div className={`screen ${getScreenClass('reflect')}`}>
+          <ReflectScreen habits={habits} />
+        </div>
+
+        {/* Detail overlay */}
+        <div className={`screen ${getScreenClass('detail')}`}>
+          <HabitDetailScreen habit={selectedHabit} onBack={() => setSelectedHabit(null)} tweak={tweak} />
+        </div>
+
+        {/* Create overlay */}
+        <div className={`screen ${getScreenClass('create')}`}>
+          <CreateHabitScreen onBack={() => setShowCreate(false)} onSave={h => { setHabits(p => [...p, h]); setShowCreate(false); }} />
+        </div>
+      </div>
+
+      {/* Bottom nav */}
+      {authDone && !showOnboarding && !isDetail && !isCreate && (
+        <div className="bottom-nav">
+          {[{id:'today',label:'Today',icon:'☀️'},{id:'stats',label:'Progress',icon:'📊'},{id:'reflect',label:'Reflect',icon:'✍️'}].map(n => (
+            <button key={n.id} className={`nav-item ${tab===n.id?'active':''}`} onClick={() => setTab(n.id)}>
+              <span className="nav-icon">{n.icon}</span>
+              <span className="nav-label">{n.label}</span>
+            </button>
+          ))}
+          <button className="nav-item" onClick={() => window.postMessage({ type: '__activate_edit_mode' }, '*')}>
+            <span className="nav-icon">⚙️</span>
+            <span className="nav-label">Settings</span>
+          </button>
+        </div>
+      )}
+
+      {/* Settings panel */}
+      <TweaksPanel title="Settings">
+        <TweakSection label="Colors">
+          <TweakColor label="Accent" value={tweak.accentColor} onChange={v => setTweak('accentColor', v)} />
+          <TweakColor label="Dark accent" value={tweak.darkAccent} onChange={v => setTweak('darkAccent', v)} />
+        </TweakSection>
+        <TweakSection label="Behavior">
+          <TweakToggle label="Confetti on check-off" value={tweak.enableConfetti} onChange={v => setTweak('enableConfetti', v)} />
+        </TweakSection>
+        <TweakSection label="Account">
+          <div style={{ fontSize:12, color:'rgba(41,38,27,0.55)', padding:'2px 0' }}>Signed in as <b>{userName}</b></div>
+          <TweakButton label="Sign out" secondary onClick={handleSignOut} />
+        </TweakSection>
+      </TweaksPanel>
+    </div>
+  );
+}
+
+const root = ReactDOM.createRoot(document.getElementById('root'));
+root.render(<App />);
+</script>
+</body>
+</html>

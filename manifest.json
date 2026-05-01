@@ -1,0 +1,19 @@
+{
+  "name": "Streak — Habit Tracker",
+  "short_name": "Streak",
+  "description": "Build habits that actually stick — one tiny win at a time.",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#F9F6F0",
+  "theme_color": "#B07D6E",
+  "icons": [
+    {
+      "src": "icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
