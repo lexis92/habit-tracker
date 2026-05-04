@@ -37,7 +37,10 @@ export default function AuthPage() {
         const { data, error } = await supabase.auth.signUp({
           email,
           password,
-          options: { data: { full_name: name } },
+          options: {
+            data: { full_name: name },
+            emailRedirectTo: `${window.location.origin}/auth/callback`,
+          },
         })
         if (error) throw error
         if (data.session) {
@@ -88,8 +91,11 @@ export default function AuthPage() {
       >
         {/* Logo */}
         <div className="flex flex-col items-center mb-8">
-          <div className="text-5xl mb-3">🔥</div>
-          <h1 className="font-serif text-3xl text-clay-700">Streak</h1>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src="/logo.svg" alt="Streakcred+" width={64} height={64} className="rounded-2xl mb-3 shadow-md" />
+          <h1 className="font-serif text-3xl text-clay-700">
+            Streakcred<span className="text-clay-400">+</span>
+          </h1>
           <p className="text-clay-400 text-sm mt-1">Build habits that actually stick.</p>
         </div>
 

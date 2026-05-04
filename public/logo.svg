@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 400">
+  <!-- Warm cream background -->
+  <rect width="400" height="400" rx="88" fill="#F4E8DC"/>
+
+  <!-- Flame outer — dark clay -->
+  <path d="M200 55
+    C225 95 260 155 258 215
+    C256 260 240 290 200 300
+    C160 290 144 260 142 215
+    C140 155 175 95 200 55Z"
+    fill="#7A4A3C"/>
+
+  <!-- Flame middle — medium clay -->
+  <path d="M200 115
+    C215 145 238 185 236 220
+    C234 250 222 272 200 282
+    C178 272 166 250 164 220
+    C162 185 185 145 200 115Z"
+    fill="#C4845A"/>
+
+  <!-- Flame core — cream glow -->
+  <path d="M200 175
+    C208 195 215 215 215 232
+    C215 248 209 260 200 265
+    C191 260 185 248 185 232
+    C185 215 192 195 200 175Z"
+    fill="#F0DDD0"/>
+
+  <!-- Plus badge circle -->
+  <circle cx="300" cy="308" r="60" fill="#3D2B1F"/>
+  <!-- Plus horizontal arm -->
+  <rect x="273" y="296" width="54" height="24" rx="12" fill="#F4E8DC"/>
+  <!-- Plus vertical arm -->
+  <rect x="288" y="281" width="24" height="54" rx="12" fill="#F4E8DC"/>
+</svg>

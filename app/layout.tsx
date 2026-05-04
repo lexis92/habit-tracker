@@ -1,12 +1,13 @@
 import type { Metadata, Viewport } from 'next'
 import './globals.css'
 import { Toaster } from 'sonner'
+import { SplashScreen } from '@/components/SplashScreen'
 
 export const metadata: Metadata = {
-  title: 'Streak — Habit Tracker',
+  title: 'Streakcred+',
   description: 'Build habits that actually stick.',
   manifest: '/manifest.json',
-  appleWebApp: { capable: true, statusBarStyle: 'default', title: 'Streak' },
+  appleWebApp: { capable: true, statusBarStyle: 'default', title: 'Streakcred+' },
 }
 
 export const viewport: Viewport = {
@@ -21,6 +22,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     <html lang="en">
       <body className="bg-cream-100 font-sans antialiased">
         <div className="mx-auto max-w-[480px] h-dvh relative overflow-hidden bg-cream-100">
+          <SplashScreen />
           {children}
         </div>
         <Toaster position="top-center" />
